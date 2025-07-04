@@ -87,15 +87,19 @@ if uploaded_tb and company and month:
             except Exception as e:
                 st.warning(f"Skipped line due to parsing error: {line} ({e})")
 
-    if not tb_data:
-        st.error("No matching Trial Balance lines found in PDF. Please verify PDF format or regex pattern.")
-        st.stop()
-
     df_tb = pd.DataFrame(tb_data)
 
-    if "Code" not in df_tb.columns:
-        st.error("Extracted TB data does not contain 'Code' column. Extraction failed.")
+    # === SAFETY CHECKS ===
+    if df_tb.empty:
+        st.error("Extracted TB DataFrame is empty. Check PDF content and regex pattern.")
         st.stop()
+
+    if "Code" not in df_tb.columns:
+        st.error("'Code' column missing in extracted TB DataFrame. Extraction failed.")
+        st.write("DEBUG: df_tb columns:", df_tb.columns.tolist())
+        st.write("DEBUG: df_tb head:", df_tb.head())
+        st.stop()
+    # =====================
 
     st.subheader("✅ Extracted TB Data")
     st.dataframe(df_tb)
