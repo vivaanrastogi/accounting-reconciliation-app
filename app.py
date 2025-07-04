@@ -7,7 +7,6 @@ import math
 import gdown
 
 st.set_page_config(page_title="Accounting Reconciliation Portal", layout="centered")
-
 st.title("📄 Accounting Reconciliation Portal")
 
 # Step 1: Input company and month
@@ -17,63 +16,57 @@ month = st.text_input("Enter month in YYYYMM format (e.g., 202504):")
 # Step 2: Upload TB PDF
 uploaded_tb = st.file_uploader("Upload TB PDF file", type=["pdf"])
 
-# Step 3: Parameters for auto-downloading input Excel
+# Step 3: Input Excel download
 sheet_url = "https://docs.google.com/spreadsheets/d/1Po0CjZMbtT9-QkpwyuWB13IjG5gvBEYMs9Y1c01BsgM/export?format=xlsx"
 inputdata_path = f"inputdata_{month}.xlsx"
 
 if uploaded_tb and company and month:
-    st.success("TB PDF uploaded. Downloading input Excel file...")
+    st.success("TB PDF uploaded. Downloading input Excel...")
 
-    # Download input Excel from Google Sheets if not exists
     if not os.path.exists(inputdata_path):
         try:
             gdown.download(sheet_url, inputdata_path, quiet=False)
-            st.success("Input Excel downloaded successfully.")
+            st.success("Input Excel downloaded.")
         except Exception as e:
-            st.error(f"Failed to download input Excel: {e}")
+            st.error(f"Failed to download Excel: {e}")
             st.stop()
-    else:
-        st.info(f"Using cached input Excel: {inputdata_path}")
 
-    # Save TB PDF temporarily
+    # Save TB file
     tb_filename = f"{company.lower()}_tb_{month}.pdf"
     with open(tb_filename, "wb") as f:
         f.write(uploaded_tb.read())
 
-    # Read Excel and get staff_name for the company
+    # Read Excel
     df_input = pd.read_excel(inputdata_path)
     df_input.columns = [col.strip().lower() for col in df_input.columns]
 
     eng_col = 'eng name'
     staff_col = 'staff name'
 
-    # Debug check: company presence
     if eng_col not in df_input.columns or staff_col not in df_input.columns:
-        st.error(f"Expected columns '{eng_col}' and '{staff_col}' not found in Excel file.")
+        st.error(f"Missing columns '{eng_col}' or '{staff_col}' in Excel.")
         st.stop()
 
     matches = df_input[df_input[eng_col].str.upper() == company.upper()]
     if matches.empty:
-        st.error(f"No rows found for company '{company}' in Excel data. Please check spelling or Excel content.")
+        st.error(f"No matching entry for company '{company}' in Excel.")
         st.stop()
 
     staff_name = matches.iloc[0][staff_col]
-    st.write(f"Found staff name: {staff_name}")
+    st.write(f"👤 Staff Name: {staff_name}")
 
-    # Extract TB PDF text
+    # Extract TB text
     with fitz.open(tb_filename) as doc:
         text = "\n".join(page.get_text() for page in doc)
 
-    # Show preview of extracted text
-    st.subheader("Preview of extracted PDF text (first 1000 chars):")
-    st.text(text[:1000])
+    st.subheader("📄 Preview of Extracted Text")
+    st.text(text[:1000])  # show sample
 
-    # Regex pattern to match TB lines with code and amounts
+    # Regex pattern
     pattern = re.compile(
         r"(\d{4}-\d{2})\s+.+?([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})"
     )
 
-    # Extract TB lines using regex pattern
     tb_data = []
     for line in text.splitlines():
         match = pattern.match(line)
@@ -85,26 +78,26 @@ if uploaded_tb and company and month:
                 amount = balance_debit if balance_debit > 0 else -balance_credit
                 tb_data.append({"Code": code, "Amount": amount})
             except Exception as e:
-                st.warning(f"Skipped line due to parsing error: {line} ({e})")
+                st.warning(f"Line skipped: {line} — {e}")
 
     df_tb = pd.DataFrame(tb_data)
 
-    # === SAFETY CHECKS ===
+    # === SAFETY CHECKS BEFORE USING 'Code' ===
     if df_tb.empty:
-        st.error("Extracted TB DataFrame is empty. Check PDF content and regex pattern.")
+        st.error("Extracted TB DataFrame is empty. Check PDF content.")
         st.stop()
 
     if "Code" not in df_tb.columns:
-        st.error("'Code' column missing in extracted TB DataFrame. Extraction failed.")
+        st.error("'Code' column not found in TB data. Check PDF format.")
         st.write("DEBUG: df_tb columns:", df_tb.columns.tolist())
         st.write("DEBUG: df_tb head:", df_tb.head())
         st.stop()
-    # =====================
+    # ==========================================
 
     st.subheader("✅ Extracted TB Data")
     st.dataframe(df_tb)
 
-    # Manual actual PDF values & mappings (update as needed)
+    # PDF actuals
     pdf_actual_values = {
         "Bank1 amt": 5331520.94,
         "Bank2 amt": None,
@@ -130,11 +123,11 @@ if uploaded_tb and company and month:
         "Bank6 amt": "1117-01",
         "Bank7 amt": "1118-01",
         "Bank8 amt": "1119-01",
-        "PND1 amt":  "2132-01",
-        "PND3 amt":  "2132-02",
+        "PND1 amt": "2132-01",
+        "PND3 amt": "2132-02",
         "PND53 amt": "2132-02",
-        "PP30 amt":  "2137-00",
-        "SSO amt":   "2131-04"
+        "PP30 amt": "2137-00",
+        "SSO amt": "2131-04"
     }
 
     file_map = {
@@ -148,7 +141,6 @@ if uploaded_tb and company and month:
         "SSO amt": f"สปส1-10_{month}.pdf"
     })
 
-    # Compare TB vs Actual, build results
     results = []
 
     for name, tb_code in tb_code_map.items():
@@ -172,26 +164,21 @@ if uploaded_tb and company and month:
         })
 
     df_result = pd.DataFrame(results)
-
-    # Format TB amounts as string with commas & 2 decimals
     df_result["TB code amount column5(+),6(-)"] = df_result["TB code amount column5(+),6(-)"].apply(
         lambda x: f"{x:,.2f}" if pd.notnull(x) and not math.isnan(x) and not math.isinf(x) else ""
     )
 
-    st.subheader("🔍 Reconciliation Summary")
+    st.subheader("🔍 Reconciliation Results")
     st.dataframe(df_result)
 
-    # Export to Excel with formatting
+    # === Excel export ===
     output_file = f"result_{company.lower()}_{month}.xlsx"
-
     if os.path.exists(output_file):
         os.remove(output_file)
 
     import xlsxwriter
-
     with pd.ExcelWriter(output_file, engine='xlsxwriter') as writer:
         df_result.to_excel(writer, index=False, sheet_name='Summary')
-
         workbook = writer.book
         worksheet = writer.sheets['Summary']
 
@@ -216,38 +203,30 @@ if uploaded_tb and company and month:
             'num_format': '#,##0.00'
         })
 
-        # Write headers
+        # Headers
         for col_num, value in enumerate(df_result.columns):
             worksheet.write(0, col_num, value, header_format)
 
-        # Write data rows
+        # Rows
         for row_num in range(1, len(df_result) + 1):
             for col_num in range(len(df_result.columns)):
                 val = df_result.iloc[row_num - 1, col_num]
-                if col_num == 3:  # Amount column
-                    if pd.notnull(val) and not (math.isnan(val) or math.isinf(val)):
+                if col_num == 3:  # amount col
+                    try:
                         worksheet.write(row_num, col_num, float(val.replace(",", "")), amount_format)
-                    else:
+                    except:
                         worksheet.write(row_num, col_num, "", cell_format)
                 else:
-                    if val is None or (isinstance(val, float) and (math.isnan(val) or math.isinf(val))):
-                        worksheet.write(row_num, col_num, "", cell_format)
-                    else:
-                        worksheet.write(row_num, col_num, val, cell_format)
+                    worksheet.write(row_num, col_num, val if val else "", cell_format)
 
-        # Auto-adjust column widths
+        # Autosize
         for i, col in enumerate(df_result.columns):
             max_len = max(df_result[col].astype(str).map(len).max(), len(col)) + 2
             worksheet.set_column(i, i, max_len)
 
-    # Provide Excel download button
+    # Download
     with open(output_file, "rb") as f:
-        st.download_button(
-            label="⬇️ Download Reconciliation Excel",
-            data=f,
-            file_name=output_file,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.download_button("⬇️ Download Excel", f, file_name=output_file)
 
 else:
     st.info("Please enter company name, month, and upload TB PDF.")
