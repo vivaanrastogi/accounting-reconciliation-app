@@ -59,12 +59,9 @@ if uploaded_tb and company and month:
     with fitz.open(tb_filename) as doc:
         text = "\n".join(page.get_text() for page in doc)
 
-    st.subheader("📄 Preview of Extracted Text")
-    st.text(text[:1000])  # show sample
-
-    # Regex pattern
+    # Regex pattern (updated to handle * or -)
     pattern = re.compile(
-        r"(\d{4}-\d{2})\s+.+?([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})"
+        r"(\d{4}[-*]\d{2})\s+.+?([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})"
     )
 
     tb_data = []
@@ -72,7 +69,7 @@ if uploaded_tb and company and month:
         match = pattern.match(line)
         if match:
             try:
-                code = match.group(1)
+                code = match.group(1).replace("*", "-")
                 balance_debit = float(match.group(6).replace(",", ""))
                 balance_credit = float(match.group(7).replace(",", ""))
                 amount = balance_debit if balance_debit > 0 else -balance_credit
@@ -82,22 +79,11 @@ if uploaded_tb and company and month:
 
     df_tb = pd.DataFrame(tb_data)
 
-    # === SAFETY CHECKS BEFORE USING 'Code' ===
-    if df_tb.empty:
+    if df_tb.empty or "Code" not in df_tb.columns:
         st.error("Extracted TB DataFrame is empty. Check PDF content.")
         st.stop()
 
-    if "Code" not in df_tb.columns:
-        st.error("'Code' column not found in TB data. Check PDF format.")
-        st.write("DEBUG: df_tb columns:", df_tb.columns.tolist())
-        st.write("DEBUG: df_tb head:", df_tb.head())
-        st.stop()
-    # ==========================================
-
-    st.subheader("✅ Extracted TB Data")
-    st.dataframe(df_tb)
-
-    # PDF actuals
+    # Hardcoded actual PDF values
     pdf_actual_values = {
         "Bank1 amt": 5331520.94,
         "Bank2 amt": None,
@@ -123,11 +109,11 @@ if uploaded_tb and company and month:
         "Bank6 amt": "1117-01",
         "Bank7 amt": "1118-01",
         "Bank8 amt": "1119-01",
-        "PND1 amt": "2132-01",
-        "PND3 amt": "2132-02",
+        "PND1 amt":  "2132-01",
+        "PND3 amt":  "2132-02",
         "PND53 amt": "2132-02",
-        "PP30 amt": "2137-00",
-        "SSO amt": "2131-04"
+        "PP30 amt":  "2137-00",
+        "SSO amt":   "2131-04"
     }
 
     file_map = {
@@ -142,7 +128,6 @@ if uploaded_tb and company and month:
     })
 
     results = []
-
     for name, tb_code in tb_code_map.items():
         tb_rows = df_tb[df_tb["Code"] == tb_code]
         tb_amt = tb_rows["Amount"].iloc[0] if not tb_rows.empty else None
@@ -155,7 +140,7 @@ if uploaded_tb and company and month:
 
         results.append({
             "Name": name,
-            "source file": file_map.get(name, ""),
+            "source file": file_map[name],
             "TB Code": tb_code,
             "TB code amount column5(+),6(-)": tb_amt,
             "PDF actual amount": pdf_amt,
@@ -168,17 +153,10 @@ if uploaded_tb and company and month:
         lambda x: f"{x:,.2f}" if pd.notnull(x) and not math.isnan(x) and not math.isinf(x) else ""
     )
 
-    st.subheader("🔍 Reconciliation Results")
-    st.dataframe(df_result)
-
-    # === Excel export ===
     output_file = f"result_{company.lower()}_{month}.xlsx"
-    if os.path.exists(output_file):
-        os.remove(output_file)
-
-    import xlsxwriter
     with pd.ExcelWriter(output_file, engine='xlsxwriter') as writer:
         df_result.to_excel(writer, index=False, sheet_name='Summary')
+
         workbook = writer.book
         worksheet = writer.sheets['Summary']
 
@@ -189,13 +167,11 @@ if uploaded_tb and company and month:
             'align': 'center',
             'valign': 'vcenter'
         })
-
         cell_format = workbook.add_format({
             'border': 1,
             'align': 'center',
             'valign': 'vcenter'
         })
-
         amount_format = workbook.add_format({
             'border': 1,
             'align': 'right',
@@ -203,30 +179,25 @@ if uploaded_tb and company and month:
             'num_format': '#,##0.00'
         })
 
-        # Headers
         for col_num, value in enumerate(df_result.columns):
             worksheet.write(0, col_num, value, header_format)
 
-        # Rows
         for row_num in range(1, len(df_result) + 1):
             for col_num in range(len(df_result.columns)):
                 val = df_result.iloc[row_num - 1, col_num]
-                if col_num == 3:  # amount col
-                    try:
-                        worksheet.write(row_num, col_num, float(val.replace(",", "")), amount_format)
-                    except:
-                        worksheet.write(row_num, col_num, "", cell_format)
+                if col_num == 3:
+                    worksheet.write(row_num, col_num, val, amount_format)
                 else:
-                    worksheet.write(row_num, col_num, val if val else "", cell_format)
+                    if val is None or (isinstance(val, float) and (math.isnan(val) or math.isinf(val))):
+                        worksheet.write(row_num, col_num, "", cell_format)
+                    else:
+                        worksheet.write(row_num, col_num, val, cell_format)
 
-        # Autosize
         for i, col in enumerate(df_result.columns):
             max_len = max(df_result[col].astype(str).map(len).max(), len(col)) + 2
             worksheet.set_column(i, i, max_len)
 
-    # Download
     with open(output_file, "rb") as f:
-        st.download_button("⬇️ Download Excel", f, file_name=output_file)
-
+        st.download_button("⬇️ Download Reconciliation Excel", f, file_name=output_file)
 else:
     st.info("Please enter company name, month, and upload TB PDF.")
