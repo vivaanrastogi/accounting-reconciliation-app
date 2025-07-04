@@ -59,7 +59,6 @@ if uploaded_tb and company and month:
     with fitz.open(tb_filename) as doc:
         text = "\n".join(page.get_text() for page in doc)
 
-    # Regex pattern (updated to handle * or -)
     pattern = re.compile(
         r"(\d{4}[-*]\d{2})\s+.+?([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})"
     )
@@ -82,23 +81,6 @@ if uploaded_tb and company and month:
     if df_tb.empty or "Code" not in df_tb.columns:
         st.error("Extracted TB DataFrame is empty. Check PDF content.")
         st.stop()
-
-    # Hardcoded actual PDF values
-    pdf_actual_values = {
-        "Bank1 amt": 5331520.94,
-        "Bank2 amt": None,
-        "Bank3 amt": None,
-        "Bank4 amt": None,
-        "Bank5 amt": None,
-        "Bank6 amt": None,
-        "Bank7 amt": None,
-        "Bank8 amt": None,
-        "PND1 amt": 1000.00,
-        "PND3 amt": 165.00,
-        "PND53 amt": 540.00,
-        "PP30 amt": 44145.07,
-        "SSO amt": None
-    }
 
     tb_code_map = {
         "Bank1 amt": "1112-01",
@@ -126,6 +108,20 @@ if uploaded_tb and company and month:
         "PP30 amt": f"ภ.พ.30_{month}.pdf",
         "SSO amt": f"สปส1-10_{month}.pdf"
     })
+
+    pdf_actual_values = {}
+    for name, filename in file_map.items():
+        if os.path.exists(filename):
+            try:
+                with fitz.open(filename) as doc:
+                    text = "\n".join(page.get_text() for page in doc)
+                values = [float(val.replace(",", "")) for val in re.findall(r"\d[\d,]+\.\d{2}", text)]
+                pdf_actual_values[name] = max(values) if values else None
+            except Exception as e:
+                st.warning(f"Error reading {filename}: {e}")
+                pdf_actual_values[name] = None
+        else:
+            pdf_actual_values[name] = None
 
     results = []
     for name, tb_code in tb_code_map.items():
